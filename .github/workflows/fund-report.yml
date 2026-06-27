@@ -1,0 +1,30 @@
+name: Fund Portfolio Weekly Analysis
+
+on:
+  schedule:
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'trigger'
+        required: false
+        default: 'manual'
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies
+        run: pip install --quiet akshare pandas numpy requests markdown 2>&1 | tail -3
+      - name: Run analysis
+        run: python scripts/analyze.py 2>&1
+      - name: Test
+        run: echo "DISPATCH_WORKS"
