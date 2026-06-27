@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 def load_config():
     """加载持仓配置"""
-    config_path = os.path.join(os.path.dirname(__file__), 'config', 'holdings.json')
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'holdings.json')
     with open(config_path) as f:
         return json.load(f)
 
