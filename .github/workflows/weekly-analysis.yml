@@ -1,79 +1,126 @@
-name: 基金持仓周报分析
+name: Fund Portfolio Weekly Analysis
 
 on:
   schedule:
-    # 每周一北京时间 9:00 (UTC 01:00)
     - cron: '0 1 * * 1'
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    
+    timeout-minutes: 20
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-      
+
       - name: Install dependencies
-        run: |
-          pip install akshare pandas numpy requests
-      
-      - name: Run analysis script
-        run: python scripts/analyze.py
-        continue-on-error: true
-      
-      - name: Read report
-        id: report
-        run: |
-          REPORT_FILE=$(ls -t output/report_*.md | head -1)
-          echo "report_file=$REPORT_FILE" >> $GITHUB_OUTPUT
-          echo "report_content<<EOF" >> $GITHUB_OUTPUT
-          cat "$REPORT_FILE" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-      
-      - name: AI Analysis with Gemini
-        id: ai_analysis
-        uses: google-github-actions/run-gemini-cli@v0.1
+        run: pip install --quiet akshare pandas numpy requests markdown
+
+      - name: Run analysis
+        run: python scripts/analyze.py 2>&1
+
+      - name: AI Analysis via Gemini
+        id: ai
+        if: always()
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        with:
-          prompt: |
-            你是一位保守型个人投资顾问。以下是基金持仓周报数据。
-            
-            请基于以下原则生成投资建议：
-            1. 保守风格：最大回撤容忍<10%，优先保本
-            2. 目标配置：现金35% / 固收35% / 权益25% / QDII 5%
-            3. 给出具体到每个基金的操作建议（增持/减持/持有）
-            4. 标注风险提示
-            
-            报告数据：
-            ${{ steps.report.report_content }}
-            
-            输出格式：简体中文，列表形式，不用表格，建议具体可执行。
-      
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -e
+          REPORT=$(ls -t output/report_*.md 2>/dev/null | head -1)
+          if [ -z "$REPORT" ]; then
+            echo "No report generated"
+            exit 1
+          fi
+          
+          REPORT_TEXT=$(cat "$REPORT")
+          
+          PROMPT="You are a conservative investment advisor. Analyze this fund portfolio report and give adjustment suggestions in Simplified Chinese.
+          
+Principles:
+- Conservative: max drawdown tolerance <10%
+- Target allocation: Cash 35% / Bonds 35% / Equity 25% / QDII 5%
+- Give per-fund action: increase/decrease/hold
+- Flag asset classes deviating >3% from target
+- Max 500 words, bullet points, no tables
+
+Report:
+${REPORT_TEXT}"
+          
+          # Try Gemini first
+          if [ -n "$GEMINI_API_KEY" ]; then
+            ESCAPED=$(python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" <<< "$PROMPT")
+            RESP=$(curl -s -X POST \
+              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}" \
+              -H 'Content-Type: application/json' \
+              -d "{\"contents\":[{\"parts\":[{\"text\":${ESCAPED}}]}],\"generationConfig\":{\"temperature\":0.3,\"maxOutputTokens\":2048}}")
+            RESULT=$(echo "$RESP" | python3 -c "
+          import sys,json
+          try:
+              d=json.load(sys.stdin)
+              print(d['candidates'][0]['content']['parts'][0]['text'])
+          except Exception as e:
+              print('GEMINI_ERROR:'+str(e))
+          " 2>&1)
+            if [[ ! "$RESULT" == GEMINI_ERROR:* ]] && [ -n "$RESULT" ]; then
+              echo "$RESULT" > /tmp/ai_result.md
+              echo "backend=gemini" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+          
+          # Fallback: Groq
+          if [ -n "$GROQ_API_KEY" ]; then
+            ESCAPED=$(python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" <<< "$PROMPT")
+            RESP=$(curl -s -X POST \
+              "https://api.groq.com/openai/v1/chat/completions" \
+              -H "Authorization: Bearer ***" \
+              -H 'Content-Type: application/json' \
+              -d "{\"model\":\"llama-3.3-70b-versatile\",\"messages\":[{\"role\":\"user\",\"content\":${ESCAPED}}],\"temperature\":0.3,\"max_tokens\":2048}")
+            RESULT=$(echo "$RESP" | python3 -c "
+          import sys,json
+          try:
+              d=json.load(sys.stdin)
+              print(d['choices'][0]['message']['content'])
+          except Exception as e:
+              print('GROQ_ERROR:'+str(e))
+          " 2>&1)
+            if [[ ! "$RESULT" == GROQ_ERROR:* ]] && [ -n "$RESULT" ]; then
+              echo "$RESULT" > /tmp/ai_result.md
+              echo "backend=groq" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+          
+          # Final fallback: output raw report
+          echo "$REPORT_TEXT" > /tmp/ai_result.md
+          echo "backend=none" >> $GITHUB_OUTPUT
+
       - name: Send email
-        uses: dawidd6/action-send-mail@v3
+        if: steps.ai.outputs.backend != ''
+        uses: dawidd6/action-send-mail@v4
         with:
           server_address: smtp.gmail.com
           server_port: 587
           username: ${{ secrets.GMAIL_USERNAME }}
           password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          subject: "基金持仓周报 - $(date +%Y-%m-%d)"
+          subject: "Fund Weekly Report - $(date +%Y-%m-%d)"
           to: ${{ secrets.GMAIL_RECIPIENT }}
-          from: ${{ secrets.GMAIL_USERNAME }}
-          html_body: ${{ steps.ai_analysis.outputs.response }}
+          from: "Portfolio Analyzer <${{ secrets.GMAIL_USERNAME }}>"
+          body: ${{ steps.ai.outputs.result }}
           convert_markdown: true
-      
-      - name: Upload report artifact
+
+      - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: weekly-report
+          name: report-${{ github.run_number }}
           path: output/
-          retention-days: 30
+          retention-days: 90
