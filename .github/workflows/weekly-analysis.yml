@@ -3,7 +3,7 @@ name: Fund Portfolio Weekly Analysis
 on:
   schedule:
     - cron: '0 1 * * 1'
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 jobs:
   analyze:
@@ -39,11 +39,9 @@ jobs:
             echo "No report generated"
             exit 1
           fi
-          
           REPORT_TEXT=$(cat "$REPORT")
-          
           PROMPT="You are a conservative investment advisor. Analyze this fund portfolio report and give adjustment suggestions in Simplified Chinese.
-          
+
 Principles:
 - Conservative: max drawdown tolerance <10%
 - Target allocation: Cash 35% / Bonds 35% / Equity 25% / QDII 5%
@@ -53,53 +51,40 @@ Principles:
 
 Report:
 ${REPORT_TEXT}"
-          
-          # Try Gemini first
           if [ -n "$GEMINI_API_KEY" ]; then
             ESCAPED=$(python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" <<< "$PROMPT")
-            RESP=$(curl -s -X POST \
-              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}" \
-              -H 'Content-Type: application/json' \
-              -d "{\"contents\":[{\"parts\":[{\"text\":${ESCAPED}}]}],\"generationConfig\":{\"temperature\":0.3,\"maxOutputTokens\":2048}}")
+            RESP=$(curl -s -X POST               "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}"               -H 'Content-Type: application/json'               -d "{"contents":[{"parts":[{"text":${ESCAPED}}]}],"generationConfig":{"temperature":0.3,"maxOutputTokens":2048}}")
             RESULT=$(echo "$RESP" | python3 -c "
-          import sys,json
-          try:
-              d=json.load(sys.stdin)
-              print(d['candidates'][0]['content']['parts'][0]['text'])
-          except Exception as e:
-              print('GEMINI_ERROR:'+str(e))
-          " 2>&1)
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    print(d['candidates'][0]['content']['parts'][0]['text'])
+except Exception as e:
+    print('GEMINI_ERROR:'+str(e))
+" 2>&1)
             if [[ ! "$RESULT" == GEMINI_ERROR:* ]] && [ -n "$RESULT" ]; then
               echo "$RESULT" > /tmp/ai_result.md
               echo "backend=gemini" >> $GITHUB_OUTPUT
               exit 0
             fi
           fi
-          
-          # Fallback: Groq
           if [ -n "$GROQ_API_KEY" ]; then
             ESCAPED=$(python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" <<< "$PROMPT")
-            RESP=$(curl -s -X POST \
-              "https://api.groq.com/openai/v1/chat/completions" \
-              -H "Authorization: Bearer ***" \
-              -H 'Content-Type: application/json' \
-              -d "{\"model\":\"llama-3.3-70b-versatile\",\"messages\":[{\"role\":\"user\",\"content\":${ESCAPED}}],\"temperature\":0.3,\"max_tokens\":2048}")
+            RESP=$(curl -s -X POST               "https://api.groq.com/openai/v1/chat/completions"               -H "Authorization: Bearer ***               -H 'Content-Type: application/json'               -d "{"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":${ESCAPED}}],"temperature":0.3,"max_tokens":2048}")
             RESULT=$(echo "$RESP" | python3 -c "
-          import sys,json
-          try:
-              d=json.load(sys.stdin)
-              print(d['choices'][0]['message']['content'])
-          except Exception as e:
-              print('GROQ_ERROR:'+str(e))
-          " 2>&1)
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    print(d['choices'][0]['message']['content'])
+except Exception as e:
+    print('GROQ_ERROR:'+str(e))
+" 2>&1)
             if [[ ! "$RESULT" == GROQ_ERROR:* ]] && [ -n "$RESULT" ]; then
               echo "$RESULT" > /tmp/ai_result.md
               echo "backend=groq" >> $GITHUB_OUTPUT
               exit 0
             fi
           fi
-          
-          # Final fallback: output raw report
           echo "$REPORT_TEXT" > /tmp/ai_result.md
           echo "backend=none" >> $GITHUB_OUTPUT
 
