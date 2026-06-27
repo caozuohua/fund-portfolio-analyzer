@@ -13,7 +13,8 @@ from datetime import datetime
 def read_report():
     """读取最新报告"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    report_dir = os.path.join(script_dir, '..', 'output')
+    # output/ is at repo root, scripts/ is one level deep
+    report_dir = os.path.normpath(os.path.join(script_dir, '..', 'output'))
     files = [f for f in os.listdir(report_dir) if f.startswith('report_') and f.endswith('.md')]
     if not files:
         return None

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-基金持仓周报分析脚本
-使用 akshare 拉取基金净值 + 市场行情，生成结构化报告
+基金持仓周报分析脚本 - 适配 akshare 新版 API
 """
 import json
 import os
 import sys
+import time
 import akshare as ak
 import pandas as pd
 import numpy as np
@@ -17,64 +17,58 @@ def load_config():
     with open(config_path) as f:
         return json.load(f)
 
-def get_fund_nav(fund_code, days=120):
-    """获取基金净值历史"""
-    tries = [
-        lambda: ak.fund_open_fund_daily_em(symbol=fund_code),
-        lambda: ak.fund_etf_fund_daily_em(symbol=fund_code),
-    ]
-    for fn in tries:
-        try:
-            df = fn()
-            if df is not None and len(df) >= 10:
-                # 找净值列
-                nav_col = None
-                for col in df.columns:
-                    if '单位净值' in col or '累计净值' in col:
-                        nav_col = col
-                        break
-                if nav_col is None:
-                    nav_col = df.columns[-1]
-                
-                close = df[nav_col].astype(float)
-                close = close[close > 0]
-                return close
-        except Exception:
-            continue
-    return None
+def get_all_fund_nav():
+    """获取全部开放式基金最新净值（日频）"""
+    print("  拉取开放式基金净值...")
+    t0 = time.time()
+    df = ak.fund_open_fund_daily_em()
+    print(f"  完成，{len(df)} 条，耗时 {time.time()-t0:.1f}s")
+    return df
 
-def calc_metrics(close):
-    """计算技术指标"""
-    if len(close) < 20:
-        return None
+def get_money_fund_nav():
+    """获取货币基金净值"""
+    print("  拉取货币基金净值...")
+    t0 = time.time()
+    try:
+        df = ak.fund_money_fund_daily_em()
+        print(f"  完成，{len(df)} 条，耗时 {time.time()-t0:.1f}s")
+        return df
+    except Exception as e:
+        print(f"  货币基金接口失败: {e}")
+        return pd.DataFrame()
+
+def get_etf_fund_nav():
+    """获取ETF基金净值"""
+    print("  拉取ETF基金净值...")
+    t0 = time.time()
+    try:
+        df = ak.fund_etf_fund_daily_em()
+        print(f"  完成，{len(df)} 条，耗时 {time.time()-t0:.1f}s")
+        return df
+    except Exception as e:
+        print(f"  ETF接口失败: {e}")
+        return pd.DataFrame()
+
+def match_fund(code, open_fund_df, money_fund_df, etf_df):
+    """在数据集中查找基金"""
+    # 先查开放式基金
+    match = open_fund_df[open_fund_df['基金代码'] == code]
+    if len(match) > 0:
+        return match.iloc[0].to_dict(), 'open'
     
-    price = close.iloc[-1]
+    # 查货币基金
+    if len(money_fund_df) > 0:
+        match = money_fund_df[money_fund_df.iloc[:, 0].astype(str).str.contains(code)]
+        if len(match) > 0:
+            return match.iloc[0].to_dict(), 'money'
     
-    # 均线
-    ma5 = close.rolling(5).mean().iloc[-1] if len(close) >= 5 else price
-    ma20 = close.rolling(20).mean().iloc[-1] if len(close) >= 20 else price
+    # 查ETF
+    if len(etf_df) > 0:
+        match = etf_df[etf_df['基金代码'] == code]
+        if len(match) > 0:
+            return match.iloc[0].to_dict(), 'etf'
     
-    # RSI(14)
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    rs = gain / loss
-    rsi = (100 - (100 / (1 + rs))).iloc[-1]
-    
-    # 涨跌幅
-    chg_5d = (close.iloc[-1] / close.iloc[-5] - 1) * 100 if len(close) >= 5 else 0
-    chg_20d = (close.iloc[-1] / close.iloc[-20] - 1) * 100 if len(close) >= 20 else 0
-    
-    return {
-        'price': price,
-        'ma5': ma5,
-        'ma20': ma20,
-        'rsi': rsi,
-        'chg_5d': chg_5d,
-        'chg_20d': chg_20d,
-        'trend': '多头排列' if ma5 > ma20 else '空头排列',
-        'rsi_tag': '超买' if rsi > 70 else ('超卖' if rsi < 30 else '中性'),
-    }
+    return None, None
 
 def get_index_data():
     """获取A股指数数据"""
@@ -96,7 +90,6 @@ def get_index_data():
                 chg_5d = (close.iloc[-1] / close.iloc[-5] - 1) * 100
                 chg_20d = (close.iloc[-1] / close.iloc[-20] - 1) * 100
                 
-                # RSI
                 delta = close.diff()
                 gain = delta.where(delta > 0, 0).rolling(14).mean()
                 loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
@@ -134,7 +127,13 @@ def generate_report(config, holdings_data, index_data):
         cat = type_map.get(h['type'], h['type'])
         type_values[cat] = type_values.get(cat, 0) + h['value']
     
-    target = config['target_allocation_conservative']
+    target = {
+        '现金类': {'target': 35},
+        '固收类': {'target': 35},
+        '权益类': {'target': 25},
+        '权益类QDII': {'target': 5},
+    }
+    
     lines.append("### 资产配置")
     lines.append("")
     lines.append("| 类别 | 当前占比 | 目标占比 | 状态 |")
@@ -156,15 +155,17 @@ def generate_report(config, holdings_data, index_data):
         lines.append(f"- **市值**: ¥{h['value']:,.2f} ({h['value']/total_value*100:.1f}%)")
         lines.append(f"- **类型**: {h['type']}")
         
-        if h.get('metrics'):
-            m = h['metrics']
-            lines.append(f"- **净值**: {m['price']:.4f}")
-            lines.append(f"- **周涨跌**: {m['chg_5d']:+.2f}%")
-            lines.append(f"- **月涨跌**: {m['chg_20d']:+.2f}%")
-            lines.append(f"- **RSI(14)**: {m['rsi']:.0f} ({m['rsi_tag']})")
-            lines.append(f"- **趋势**: {m['trend']}")
+        if h.get('nav_data'):
+            nd = h['nav_data']
+            nav = nd.get('nav', 'N/A')
+            chg = nd.get('daily_chg', 'N/A')
+            buy = nd.get('buy_status', 'N/A')
+            sell = nd.get('sell_status', 'N/A')
+            lines.append(f"- **最新净值**: {nav}")
+            lines.append(f"- **日涨跌**: {chg}")
+            lines.append(f"- **申购**: {buy} | **赎回**: {sell}")
         else:
-            lines.append("- *数据获取失败或货币基金*")
+            lines.append("- *数据获取失败*")
         lines.append("")
     
     # 市场环境
@@ -186,31 +187,72 @@ def main():
     config = load_config()
     holdings = config['holdings']
     
-    # 获取各基金净值
-    print(f"📊 共 {len(holdings)} 只基金待分析")
+    # 获取全量数据
+    open_fund_df = get_all_fund_nav()
+    money_fund_df = get_money_fund_nav()
+    etf_df = get_etf_fund_nav()
+    
+    # 匹配各基金
+    print(f"\n📊 匹配 {len(holdings)} 只基金...")
     total_value = 0
-    for i, h in enumerate(holdings):
-        print(f"  [{i+1}/{len(holdings)}] {h['name']} ({h['code']})...")
-        
-        # 计算市值
+    success = 0
+    fail = 0
+    
+    for h in holdings:
+        code = h['code']
         nav = h.get('nav', 1.0)
-        value = h['shares'] * nav
-        h['value'] = value
-        total_value += value
         
-        # 获取历史数据
-        close = get_fund_nav(h['code'])
-        if close is not None:
-            metrics = calc_metrics(close)
-            if metrics:
-                h['metrics'] = metrics
-                # 用最新净值更新市值
-                h['value'] = h['shares'] * metrics['price']
-                total_value = sum(hh.get('value', hh['shares'] * hh.get('nav', 1.0)) for hh in holdings[:i+1])
+        # 尝试匹配
+        match, source = match_fund(code, open_fund_df, money_fund_df, etf_df)
         
+        if match is not None:
+            # 提取净值
+            nav_val = None
+            for key in match:
+                if '单位净值' in str(key) and '累计' not in str(key):
+                    nav_val = str(match[key])
+                    break
+            
+            if nav_val and nav_val != '---':
+                try:
+                    nav = float(nav_val)
+                except ValueError:
+                    nav = h.get('nav', 1.0)
+                h['current_nav'] = nav
+                h['value'] = h['shares'] * nav
+                
+                # 日涨跌
+                daily_chg = 'N/A'
+                for key in match:
+                    if '增长率' in str(key):
+                        daily_chg = match[key]
+                        break
+                
+                h['nav_data'] = {
+                    'nav': nav,
+                    'daily_chg': daily_chg,
+                    'buy_status': match.get('申购状态', 'N/A'),
+                    'sell_status': match.get('赎回状态', 'N/A'),
+                }
+                success += 1
+                print(f"  ✅ {code} {h['name'][:20]}: 净值={nav}")
+            else:
+                h['value'] = h['shares'] * nav
+                fail += 1
+                print(f"  ⚠️ {code} {h['name'][:20]}: 净值解析失败")
+        else:
+            h['value'] = h['shares'] * nav
+            fail += 1
+            print(f"  ❌ {code} {h['name'][:20]}: 未找到")
+        
+        total_value += h.get('value', h['shares'] * nav)
+    
     # 更新占比
     for h in holdings:
-        h['weight'] = h['value'] / total_value * 100
+        h['weight'] = h.get('value', 0) / total_value * 100
+    
+    print(f"\n📈 匹配完成: 成功 {success}, 失败 {fail}")
+    print(f"💰 总市值: ¥{total_value:,.2f}")
     
     # 获取指数数据
     print("\n📈 获取A股指数数据...")
@@ -220,28 +262,30 @@ def main():
     print("\n📝 生成分析报告...")
     report = generate_report(config, holdings, index_data)
     
-    # 保存报告
-    output_dir = os.path.join(os.path.dirname(__file__), 'output')
+    # 保存报告到项目根目录的 output/
+    output_dir = os.path.join(os.path.dirname(__file__), '..', 'output')
     os.makedirs(output_dir, exist_ok=True)
     
     report_path = os.path.join(output_dir, f"report_{datetime.now().strftime('%Y%m%d')}.md")
     with open(report_path, 'w') as f:
         f.write(report)
     
-    # 同时保存最新数据 JSON
+    # 保存原始数据
     data_path = os.path.join(output_dir, 'latest_data.json')
     with open(data_path, 'w') as f:
         json.dump({
             'date': datetime.now().isoformat(),
             'total_value': total_value,
-            'holdings': [{k: v for k, v in h.items() if k != 'metrics'} for h in holdings],
-            'index': index_data,
+            'success_count': success,
+            'fail_count': fail,
+            'holdings': [{k: v for k, v in h.items()} for h in holdings],
+            'index': {k: {kk: vv for kk, vv in v.items() if 'error' not in v} for k, v in index_data.items()},
         }, f, ensure_ascii=False, indent=2)
     
     print(f"\n✅ 报告已生成: {report_path}")
     print(f"✅ 数据已保存: {data_path}")
     
-    # 输出报告摘要到 stdout（供 AI 分析使用）
+    # 输出报告到 stdout
     print("\n" + "="*60)
     print(report)
     
