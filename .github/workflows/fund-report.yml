@@ -1,41 +1,100 @@
 name: Fund Portfolio Weekly Analysis
-'on':
+
+on:
   schedule:
-  - cron: 0 1 * * 1
-  workflow_dispatch: null
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+
 jobs:
   analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: pip
-        cache-dependency-path: requirements.txt
-    - name: Install dependencies
-      run: pip install --quiet -r requirements.txt
-    - name: Run portfolio analysis
-      id: analysis
-      run: python scripts/analyze.py 2>&1
-      continue-on-error: true
-    - name: AI Analysis via Gemini
-      id: gemini
-      run: python3 scripts/ai_analyze.py
-      env:
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
-        GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-        GMAIL_RECIPIENT: ${{ secrets.GMAIL_RECIPIENT }}
-      continue-on-error: true
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: report-${{ github.run_number }}
-        path: output/
-        retention-days: 90
-      continue-on-error: true
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run portfolio analysis
+        id: analysis
+        run: python scripts/analyze.py
+        env:
+          PYTHONUNBUFFERED: '1'
+
+      - name: AI Analysis and Email
+        if: steps.analysis.outcome == 'success'
+        id: ai
+        run: python scripts/ai_analyze.py
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GMAIL_RECIPIENT: ${{ secrets.GMAIL_RECIPIENT }}
+          PYTHONUNBUFFERED: '1'
+
+      - name: Failure notification
+        if: failure()
+        run: echo "WORKFLOW_FAILED=true" >> $GITHUB_ENV
+
+      - name: Commit report to repo
+        if: steps.analysis.outcome == 'success'
+        run: |
+          mkdir -p reports
+          REPORT_FILE=$(ls -t output/report_*.md 2>/dev/null | head -1)
+          if [ -n "$REPORT_FILE" ]; then
+            cp "$REPORT_FILE" "reports/$(basename "$REPORT_FILE")"
+            git add reports/
+            git diff --cached --quiet || git commit -m "report: $(basename "$REPORT_FILE")"
+            git push origin main
+          fi
+
+      - name: Upload artifacts
+        if: steps.analysis.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ github.run_number }}
+          path: output/
+          retention-days: 90
+
+  notify-failure:
+    needs: analyze
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send failure alert
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "Portfolio Analysis FAILED - ${{ github.run_number }}"
+          to: ${{ secrets.GMAIL_RECIPIENT }}
+          from: "Portfolio Analyzer <${{ secrets.GMAIL_USERNAME }}>"
+          body: |
+            基金周报分析执行失败！
+
+            运行链接: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_number }}
+
+            请手动检查错误原因。
+
+            ---
+            自动告警 from GitHub Actions
