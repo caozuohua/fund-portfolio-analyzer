@@ -6,6 +6,7 @@ import json
 import os
 import smtplib
 import sys
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime
@@ -13,7 +14,6 @@ from datetime import datetime
 def read_report():
     """读取最新报告"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    # output/ is at repo root, scripts/ is one level deep
     report_dir = os.path.normpath(os.path.join(script_dir, '..', 'output'))
     files = [f for f in os.listdir(report_dir) if f.startswith('report_') and f.endswith('.md')]
     if not files:
@@ -22,47 +22,85 @@ def read_report():
     with open(os.path.join(report_dir, files[0]), 'r') as f:
         return f.read()
 
-def call_gemini(prompt, api_key):
-    """调用 Gemini API"""
+def call_gemini(prompt, api_key, retries=3):
+    """调用 Gemini API（带重试）"""
     import urllib.request
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-    payload = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048}
-    }).encode('utf-8')
     
-    req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-            return data['candidates'][0]['content']['parts'][0]['text']
-    except Exception as e:
-        print(f"Gemini error: {e}", file=sys.stderr)
-        return None
+    for attempt in range(retries):
+        try:
+            payload = json.dumps({
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048}
+            }).encode('utf-8')
+            
+            req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                text = data['candidates'][0]['content']['parts'][0]['text']
+                return text
+        except Exception as e:
+            err_str = str(e)
+            if '429' in err_str and attempt < retries - 1:
+                wait = (attempt + 1) * 10
+                print(f"  Gemini 429, retry in {wait}s...", file=sys.stderr)
+                time.sleep(wait)
+            else:
+                print(f"Gemini error: {e}", file=sys.stderr)
+                return None
+    return None
 
-def call_groq(prompt, api_key):
-    """调用 Groq API"""
+def call_groq(prompt, api_key, retries=3):
+    """调用 Groq API（带重试）"""
     import urllib.request
     
     url = "https://api.groq.com/openai/v1/chat/completions"
-    payload = json.dumps({
-        "model": "llama-3.3-70b-versatile",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.3,
-        "max_tokens": 2048
-    }).encode('utf-8')
     
-    req = urllib.request.Request(url, data=payload, headers={
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {api_key}'
-    })
+    for attempt in range(retries):
+        try:
+            payload = json.dumps({
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 2048
+            }).encode('utf-8')
+            
+            req = urllib.request.Request(url, data=payload, headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            })
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                text = data['choices'][0]['message']['content']
+                return text
+        except Exception as e:
+            err_str = str(e)
+            if ('429' in err_str or '403' in err_str) and attempt < retries - 1:
+                wait = (attempt + 1) * 5
+                print(f"  Groq error, retry in {wait}s...", file=sys.stderr)
+                time.sleep(wait)
+            else:
+                print(f"Groq error: {e}", file=sys.stderr)
+                return None
+    return None
+
+def call_gemini_sdk(prompt, api_key):
+    """使用 google-genai SDK 调用（更稳定）"""
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-            return data['choices'][0]['message']['content']
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        response = model.generate_content(
+            prompt,
+            generation_config={'temperature': 0.3, 'max_output_tokens': 2048}
+        )
+        return response.text
+    except ImportError:
+        print("google-genai SDK not installed, using REST", file=sys.stderr)
+        return None
     except Exception as e:
-        print(f"Groq error: {e}", file=sys.stderr)
+        print(f"Gemini SDK error: {e}", file=sys.stderr)
         return None
 
 def send_email(subject, body, username, password, recipient):
@@ -76,8 +114,6 @@ def send_email(subject, body, username, password, recipient):
     msg.attach(MIMEText(body, 'plain', 'utf-8'))
     
     # HTML version
-    html_body = body
-    # Convert markdown-like to basic HTML
     import re
     lines = body.split('\n')
     html_lines = []
@@ -157,22 +193,31 @@ def main():
 Report:
 """ + report
     
-    # Try Gemini first
+    # AI 调用策略
     gemini_key = os.environ.get('GEMINI_API_KEY', '')
     groq_key = os.environ.get('GROQ_API_KEY', '')
     
     result = None
     backend = 'none'
     
+    # 策略：优先用 SDK（更稳定），失败退到 REST + 重试
     if gemini_key:
-        print("Trying Gemini...")
-        result = call_gemini(prompt, gemini_key)
+        print("Trying Gemini SDK...", file=sys.stderr)
+        result = call_gemini_sdk(prompt, gemini_key)
         if result:
-            backend = 'gemini'
+            backend = 'gemini-sdk'
+    
+    if not result and gemini_key:
+        print("Trying Gemini REST (with retry)...", file=sys.stderr)
+        time.sleep(2)  # 避免限流
+        result = call_gemini(prompt, gemini_key, retries=3)
+        if result:
+            backend = 'gemini-rest'
     
     if not result and groq_key:
-        print("Trying Groq...")
-        result = call_groq(prompt, groq_key)
+        print("Trying Groq...", file=sys.stderr)
+        time.sleep(1)
+        result = call_groq(prompt, groq_key, retries=2)
         if result:
             backend = 'groq'
     
