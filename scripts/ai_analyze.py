@@ -118,15 +118,41 @@ def main():
         sys.exit(1)
     
     # Build prompt
-    prompt = """You are a conservative personal investment advisor. Analyze the following fund portfolio weekly report and provide adjustment suggestions.
+    prompt = """你是一位保守型个人投资顾问。请分析以下基金持仓周报，输出完整的调整建议和风险提示。
 
-Principles:
-- Conservative style: maximum drawdown tolerance <10%
-- Target allocation: Cash 35% / Bonds 35% / Equity 25% / QDII 5%
-- Give specific per-fund action: increase/decrease/hold
-- Flag asset classes deviating >3% from target
-- Maximum 500 Chinese characters, bullet points only, no tables
-- Output in Simplified Chinese only
+## 分析原则
+- 保守风格：最大回撤容忍<10%，优先保本，不追热点
+- 目标配置：现金35% / 固收35% / 权益25% / QDII 5%
+- 持有基金数量控制在10-12只，不随意新增
+- 调整阈值：单一资产偏离目标>3%才触发再平衡
+
+## 输出要求（必须包含以下三个部分）
+
+### 第一部分：组合诊断
+- 当前总资产和当日盈亏估算
+- 实际配置 vs 目标配置的偏离分析
+- 标注偏离>3%的资产类别
+
+### 第二部分：具体调整建议
+对每只基金给出明确操作：
+- 操作类型：增持 / 减持 / 持有 / 赎回
+- 建议调整金额（人民币）
+- 调整理由（1-2句话）
+- 如果建议买入某只新基金，给出具体的基金名称和代码
+
+### 第三部分：风险提示
+- 当前市场环境判断（基于指数数据）
+- 集中度风险（前3大持仓是否过重）
+- 流动性风险（注意持有期限制）
+- 近期需关注的事件
+- 如果整体仓位偏保守，说明当前现金的机会成本
+
+## 约束
+- 总输出控制在800字以内
+- 简体中文，列表形式，不用表格
+- 建议必须具体可执行，不要泛泛而谈
+- 不要推荐卖出低波红利类基金去追热点
+- 如果市场无明显机会，明确说"本周不建议操作"
 
 Report:
 """ + report
@@ -167,12 +193,14 @@ Report:
     
     if username and password and recipient:
         subject = f"Fund Weekly Report - {datetime.now().strftime('%Y-%m-%d')}"
-        body = f"""基金持仓周报分析报告
+        body = f"""基金持仓周报 AI 分析报告
+报告日期: {datetime.now().strftime('%Y-%m-%d')}
+分析风格: 保守型
 
 {result}
 
 ---
-本分析由 GitHub Actions 自动生成
+⚠️ 本分析由 GitHub Actions 自动生成，仅供参考，不构成投资建议。
 分析后端: {backend}
 """
         send_email(subject, body, username, password, recipient)
