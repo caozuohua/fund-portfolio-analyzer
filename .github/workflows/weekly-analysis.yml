@@ -3,7 +3,7 @@ name: Fund Portfolio Weekly Analysis
 on:
   schedule:
     - cron: '0 1 * * 1'
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 jobs:
   analyze:
@@ -24,86 +24,101 @@ jobs:
         run: pip install --quiet akshare pandas numpy requests markdown
 
       - name: Run analysis
-        run: python scripts/analyze.py 2>&1
+        run: python scripts/analyze.py 2>&1 || true
 
-      - name: AI Analysis via Gemini
+      - name: Read report path
+        id: report_path
+        run: |
+          REPORT_FILE=$(ls -t output/report_*.md 2>/dev/null | head -1)
+          if [ -n "$REPORT_FILE" ]; then
+            echo "file=$REPORT_FILE" >> $GITHUB_OUTPUT
+            echo "has_report=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_report=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: AI Analysis
         id: ai
-        if: always()
+        if: steps.report_path.outputs.has_report == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
-          set -e
-          REPORT=$(ls -t output/report_*.md 2>/dev/null | head -1)
-          if [ -z "$REPORT" ]; then
-            echo "No report generated"
-            exit 1
-          fi
-          REPORT_TEXT=$(cat "$REPORT")
-          PROMPT="You are a conservative investment advisor. Analyze this fund portfolio report and give adjustment suggestions in Simplified Chinese.
-
+          REPORT_TEXT=$(cat "${{ steps.report_path.outputs.file }}")
+          
+          PROMPT="You are a conservative Chinese investment advisor. Simplified Chinese output. Analyze this fund portfolio report.
+          
 Principles:
-- Conservative: max drawdown tolerance <10%
-- Target allocation: Cash 35% / Bonds 35% / Equity 25% / QDII 5%
-- Give per-fund action: increase/decrease/hold
-- Flag asset classes deviating >3% from target
-- Max 500 words, bullet points, no tables
+- Conservative: max drawdown <10%
+- Target: Cash 35% / Bonds 35% / Equity 25% / QDII 5%
+- Per-fund: increase/decrease/hold
+- Flag deviations >3%
+- Under 500 Chinese characters, bullet points only
 
 Report:
-${REPORT_TEXT}"
-          if [ -n "$GEMINI_API_KEY" ]; then
-            ESCAPED=$(python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" <<< "$PROMPT")
+$REPORT_TEXT"
+          
+          # Try Gemini
+          if [ -n "${GEMINI_API_KEY:-}" ]; then
+            ESC=$(python3 -c "import json,sys;print(json.dumps(sys.stdin.read()))" <<< "$PROMPT")
             RESP=$(curl -s -X POST               "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}"               -H 'Content-Type: application/json'               -d "{"contents":[{"parts":[{"text":${ESCAPED}}]}],"generationConfig":{"temperature":0.3,"maxOutputTokens":2048}}")
-            RESULT=$(echo "$RESP" | python3 -c "
+            RES=$(echo "$RESP" | python3 -c "
 import sys,json
 try:
-    d=json.load(sys.stdin)
-    print(d['candidates'][0]['content']['parts'][0]['text'])
-except Exception as e:
-    print('GEMINI_ERROR:'+str(e))
-" 2>&1)
-            if [[ ! "$RESULT" == GEMINI_ERROR:* ]] && [ -n "$RESULT" ]; then
-              echo "$RESULT" > /tmp/ai_result.md
-              echo "backend=gemini" >> $GITHUB_OUTPUT
+    print(json.load(sys.stdin)['candidates'][0]['content']['parts'][0]['text'])
+except: print('ERR')
+" 2>&2)
+            if [ "$RES" != "ERR" ] && [ -n "$RES" ]; then
+              echo "$RES" > /tmp/ai.md
               exit 0
             fi
           fi
-          if [ -n "$GROQ_API_KEY" ]; then
-            ESCAPED=$(python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" <<< "$PROMPT")
-            RESP=$(curl -s -X POST               "https://api.groq.com/openai/v1/chat/completions"               -H "Authorization: Bearer ***               -H 'Content-Type: application/json'               -d "{"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":${ESCAPED}}],"temperature":0.3,"max_tokens":2048}")
-            RESULT=$(echo "$RESP" | python3 -c "
+          
+          # Try Groq
+          if [ -n "${GROQ_API_KEY:-}" ]; then
+            ESCP=$(python3 -c "import json,sys;print(json.dumps(sys.stdin.read()))" <<< "$PROMPT")
+            RESP=$(curl -s -X POST               "https://api.groq.com/openai/v1/chat/completions"               -H "Authorization: Bearer ***               -H 'Content-Type: application/json'               -d "{"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":${ESCP}}],"temperature":0.3,"max_tokens":2048}")
+            RES2=$(echo "$RESP" | python3 -c "
 import sys,json
 try:
-    d=json.load(sys.stdin)
-    print(d['choices'][0]['message']['content'])
-except Exception as e:
-    print('GROQ_ERROR:'+str(e))
-" 2>&1)
-            if [[ ! "$RESULT" == GROQ_ERROR:* ]] && [ -n "$RESULT" ]; then
-              echo "$RESULT" > /tmp/ai_result.md
-              echo "backend=groq" >> $GITHUB_OUTPUT
+    print(json.load(sys.stdin)['choices'][0]['message']['content'])
+except: print('ERR')
+" 2>&2)
+            if [ "$RES2" != "ERR" ] && [ -n "$RES2" ]; then
+              echo "$RES2" > /tmp/ai.md
               exit 0
             fi
           fi
-          echo "$REPORT_TEXT" > /tmp/ai_result.md
-          echo "backend=none" >> $GITHUB_OUTPUT
+          
+          # Fallback
+          echo "$REPORT_TEXT" > /tmp/ai.md
+
+      - name: Debug info
+        run: |
+          echo "=== Workflow Debug ==="
+          echo "Github run number: ${{ github.run_number }}"
+          echo "AI result exists: $(test -f /tmp/ai.md && echo yes || echo no)"
+          echo "=== AI Result ==="
+          cat /tmp/ai.md 2>/dev/null || echo "No AI result"
 
       - name: Send email
-        if: steps.ai.outputs.backend != ''
+        if: steps.ai.outcome == 'success'
+        continue-on-error: true
         uses: dawidd6/action-send-mail@v4
         with:
           server_address: smtp.gmail.com
           server_port: 587
           username: ${{ secrets.GMAIL_USERNAME }}
           password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          subject: "Fund Weekly Report - $(date +%Y-%m-%d)"
+          subject: "Fund Weekly Report - ${{ github.run_number }}"
           to: ${{ secrets.GMAIL_RECIPIENT }}
-          from: "Portfolio Analyzer <${{ secrets.GMAIL_USERNAME }}>"
-          body: ${{ steps.ai.outputs.result }}
-          convert_markdown: true
+          from: ${{ secrets.GMAIL_USERNAME }}
+          body: "See debug output above. AI Response if available:"
+          convert_markdown: false
 
       - name: Upload artifacts
-        if: always()
+        if: steps.ai.outcome == 'success'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: report-${{ github.run_number }}
