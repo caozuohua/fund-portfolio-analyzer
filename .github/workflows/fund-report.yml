@@ -5,6 +5,9 @@ on:
     - cron: '0 1 * * 1'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   analyze:
     runs-on: ubuntu-latest
@@ -70,8 +73,12 @@ jobs:
             cp "$AI_REPORT_FILE" "reports/$(basename "$AI_REPORT_FILE")"
           fi
           git add reports/
-          git diff --cached --quiet || git commit -m "report: portfolio analysis $(date +%Y%m%d)"
-          git push origin main
+          if git diff --cached --quiet; then
+            echo "No report changes to commit."
+          else
+            git commit -m "report: portfolio analysis $(date +%Y%m%d)"
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
 
       - name: Upload artifacts
         if: steps.analysis.outcome == 'success'

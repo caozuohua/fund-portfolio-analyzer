@@ -111,6 +111,10 @@ https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
 
 GitHub Actions 会上传 `output/` 为 artifact，并把最新报告复制到 `reports/` 后提交到仓库。
 
+如果提交报告步骤出现 `Write access to repository not granted`，检查仓库：
+
+Settings > Actions > General > Workflow permissions，选择 **Read and write permissions**，并保存。
+
 ## Schedule
 
 - 每周一 UTC 01:00 执行（北京时间 9:00）
