@@ -15,7 +15,7 @@ from datetime import datetime
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'output'))
-DEFAULT_GEMINI_MODEL = os.environ.get('GEMINI_MODEL') or 'gemini-3.5-flash'
+DEFAULT_GEMINI_MODELS = os.environ.get('GEMINI_MODELS') or os.environ.get('GEMINI_MODEL') or 'gemini-2.5-flash-lite,gemini-2.5-flash'
 DEFAULT_GROQ_MODEL = os.environ.get('GROQ_MODEL') or 'llama-3.3-70b-versatile'
 
 def read_report():
@@ -47,9 +47,13 @@ def extract_gemini_text(data):
         raise ValueError(f"Gemini response has no text: {data}")
     return text
 
-def call_gemini_rest(prompt, api_key, model=DEFAULT_GEMINI_MODEL, retries=3):
+def gemini_models():
+    """读取 Gemini REST 模型优先级，支持逗号分隔的 GEMINI_MODELS"""
+    return [m.strip() for m in DEFAULT_GEMINI_MODELS.split(',') if m.strip()]
+
+def call_gemini_rest(prompt, api_key, model, retries=3):
     """调用 Gemini API（带重试）"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     
     for attempt in range(retries):
         try:
@@ -62,7 +66,10 @@ def call_gemini_rest(prompt, api_key, model=DEFAULT_GEMINI_MODEL, retries=3):
                 }
             }).encode('utf-8')
             
-            req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
+            req = urllib.request.Request(url, data=payload, headers={
+                'Content-Type': 'application/json',
+                'x-goog-api-key': api_key,
+            })
             with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read().decode('utf-8'))
                 return extract_gemini_text(data)
@@ -70,7 +77,8 @@ def call_gemini_rest(prompt, api_key, model=DEFAULT_GEMINI_MODEL, retries=3):
             body = e.read().decode('utf-8', errors='replace')
             retriable = e.code in (408, 429, 500, 502, 503, 504)
             if retriable and attempt < retries - 1:
-                wait = min(60, (attempt + 1) * 10)
+                retry_after = e.headers.get('Retry-After')
+                wait = int(retry_after) if retry_after and retry_after.isdigit() else min(90, 15 * (2 ** attempt))
                 print(f"  Gemini HTTP {e.code}, retry in {wait}s...", file=sys.stderr)
                 time.sleep(wait)
             else:
@@ -85,6 +93,16 @@ def call_gemini_rest(prompt, api_key, model=DEFAULT_GEMINI_MODEL, retries=3):
                 print(f"Gemini REST error: {e}", file=sys.stderr)
                 return None
     return None
+
+def call_gemini(prompt, api_key):
+    """只通过 Google AI Studio REST API 调用 Gemini，不使用 SDK"""
+    for model in gemini_models():
+        print(f"Trying Gemini REST ({model})...", file=sys.stderr)
+        result = call_gemini_rest(prompt, api_key, model=model, retries=3)
+        if result:
+            return result, f'gemini-rest:{model}'
+        print(f"Gemini model failed: {model}", file=sys.stderr)
+    return None, 'none'
 
 def call_groq(prompt, api_key, model=DEFAULT_GROQ_MODEL, retries=3):
     """调用 Groq API（带重试）"""
@@ -125,30 +143,6 @@ def call_groq(prompt, api_key, model=DEFAULT_GROQ_MODEL, retries=3):
                 print(f"Groq error: {e}", file=sys.stderr)
                 return None
     return None
-
-def call_gemini_sdk(prompt, api_key, model=DEFAULT_GEMINI_MODEL):
-    """使用新版 google-genai SDK 调用 Google AI Studio Gemini API"""
-    try:
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.25,
-                max_output_tokens=2048,
-                response_mime_type='text/plain',
-            ),
-        )
-        return response.text
-    except ImportError:
-        print("google-genai SDK not installed, using REST", file=sys.stderr)
-        return None
-    except Exception as e:
-        print(f"Gemini SDK error: {e}", file=sys.stderr)
-        return None
 
 def send_email(subject, body, username, password, recipient):
     """发送邮件"""
@@ -200,7 +194,7 @@ def save_ai_analysis(result, backend):
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(f"# AI 基金持仓分析 - {datetime.now().strftime('%Y-%m-%d')}\n\n")
         f.write(f"- 分析后端: {backend}\n")
-        f.write(f"- Gemini 模型: {DEFAULT_GEMINI_MODEL}\n\n")
+        f.write(f"- Gemini 模型候选: {DEFAULT_GEMINI_MODELS}\n\n")
         f.write(result)
         f.write("\n")
     return output_path
@@ -264,30 +258,24 @@ def main():
     # AI 调用策略
     gemini_key = os.environ.get('GEMINI_API_KEY', '')
     groq_key = os.environ.get('GROQ_API_KEY', '')
+    enable_groq = os.environ.get('ENABLE_GROQ_FALLBACK', '').lower() == 'true'
     
     result = None
     backend = 'none'
     
-    # 策略：优先用 SDK（更稳定），失败退到 REST + 重试
     if gemini_key:
-        print(f"Trying Gemini SDK ({DEFAULT_GEMINI_MODEL})...", file=sys.stderr)
-        result = call_gemini_sdk(prompt, gemini_key)
-        if result:
-            backend = 'gemini-sdk'
+        result, backend = call_gemini(prompt, gemini_key)
+    else:
+        print("GEMINI_API_KEY is not set; skipping Gemini.", file=sys.stderr)
     
-    if not result and gemini_key:
-        print(f"Trying Gemini REST ({DEFAULT_GEMINI_MODEL}, with retry)...", file=sys.stderr)
-        time.sleep(2)  # 避免限流
-        result = call_gemini_rest(prompt, gemini_key, retries=3)
-        if result:
-            backend = 'gemini-rest'
-    
-    if not result and groq_key:
+    if not result and groq_key and enable_groq:
         print(f"Trying Groq ({DEFAULT_GROQ_MODEL})...", file=sys.stderr)
         time.sleep(1)
         result = call_groq(prompt, groq_key, retries=2)
         if result:
             backend = 'groq'
+    elif not result and groq_key and not enable_groq:
+        print("Groq key is set, but ENABLE_GROQ_FALLBACK is not true; skipping Groq.", file=sys.stderr)
     
     if not result:
         print("AI analysis unavailable, sending raw report")

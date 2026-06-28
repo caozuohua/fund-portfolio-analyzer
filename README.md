@@ -28,8 +28,10 @@
 
 | Variable | 默认值 | 说明 |
 |----------|--------|------|
-| `GEMINI_MODEL` | `gemini-3.5-flash` | Google AI Studio 使用的 Gemini 模型 |
+| `GEMINI_MODELS` | `gemini-2.5-flash-lite,gemini-2.5-flash` | Google AI Studio REST API 模型候选，按顺序重试 |
+| `GEMINI_MODEL` | 空 | 兼容旧配置；未设置 `GEMINI_MODELS` 时使用 |
 | `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq 兜底模型 |
+| `ENABLE_GROQ_FALLBACK` | `false` | 是否在 Gemini 失败后尝试 Groq |
 
 **获取 Gmail 应用密码**：
 1. 登录 Google 账户
@@ -90,9 +92,17 @@ git push
 
 ## AI 后端优先级
 
-1. **Gemini** → Google AI Studio Gemini（默认 `gemini-3.5-flash`，可用 `GEMINI_MODEL` 覆盖）
-2. **Groq** → Llama 3.3 70B（超快推理，免费）
+1. **Gemini** → Google AI Studio REST API（默认 `gemini-2.5-flash-lite`，失败后尝试 `gemini-2.5-flash`）
+2. **Groq** → 仅当 `ENABLE_GROQ_FALLBACK=true` 时启用
 3. **无 API Key** → 只输出原始分析报告
+
+脚本不依赖 `google-genai` SDK，直接请求：
+
+```text
+https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+```
+
+如果 GitHub Actions 日志出现 `Gemini HTTP 429`，说明 Google AI Studio 当前 API key 命中了请求或配额限制。可以等待配额恢复，或把 `GEMINI_MODELS` 设置为更轻的模型优先级，例如只保留 `gemini-2.5-flash-lite`。
 
 自动构建会生成两类产物：
 
