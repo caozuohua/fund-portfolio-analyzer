@@ -10,7 +10,7 @@
 - 支持 Gemini / Groq 双 AI 后端分析
 - 通过 GitHub Actions 定时执行，邮件发送报告
 
-## быстро开始
+## 快速开始
 
 ### 1. 配置 GitHub Secrets
 
@@ -23,6 +23,13 @@
 | `GMAIL_USERNAME` | 发送方 Gmail 地址 | 是 |
 | `GMAIL_APP_PASSWORD` | Gmail 应用密码（不是登录密码） | 是 |
 | `GMAIL_RECIPIENT` | 接收报告的邮箱 | 是 |
+
+可选 GitHub Variables：
+
+| Variable | 默认值 | 说明 |
+|----------|--------|------|
+| `GEMINI_MODEL` | `gemini-3.5-flash` | Google AI Studio 使用的 Gemini 模型 |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq 兜底模型 |
 
 **获取 Gmail 应用密码**：
 1. 登录 Google 账户
@@ -68,6 +75,7 @@ GitHub 仓库页面 > Actions > Fund Portfolio Weekly Analysis > Run workflow
 ```bash
 pip install akshare pandas numpy
 python scripts/analyze.py
+python scripts/ai_analyze.py
 ```
 
 ## 如何更新持仓
@@ -82,9 +90,16 @@ git push
 
 ## AI 后端优先级
 
-1. **Gemini** → Google Gemini 2.0 Flash（免费额度充足）
+1. **Gemini** → Google AI Studio Gemini（默认 `gemini-3.5-flash`，可用 `GEMINI_MODEL` 覆盖）
 2. **Groq** → Llama 3.3 70B（超快推理，免费）
 3. **无 API Key** → 只输出原始分析报告
+
+自动构建会生成两类产物：
+
+- `output/report_YYYYMMDD.md`：基金净值、配置偏离、市场指数等基础周报
+- `output/ai_analysis_YYYYMMDD.md`：Gemini/Groq 生成的持仓诊断、调仓建议和风险提示
+
+GitHub Actions 会上传 `output/` 为 artifact，并把最新报告复制到 `reports/` 后提交到仓库。
 
 ## Schedule
 

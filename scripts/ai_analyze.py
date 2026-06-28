@@ -1,68 +1,101 @@
 #!/usr/bin/env python3
 """
-AI 分析脚本 - 读取报告，调用 Gemini/Groq，发送邮件
+AI 分析脚本 - 读取报告，调用 Gemini/Groq，保存分析结果并发送邮件
 """
 import json
 import os
 import smtplib
 import sys
 import time
+import urllib.error
+import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'output'))
+DEFAULT_GEMINI_MODEL = os.environ.get('GEMINI_MODEL') or 'gemini-3.5-flash'
+DEFAULT_GROQ_MODEL = os.environ.get('GROQ_MODEL') or 'llama-3.3-70b-versatile'
+
 def read_report():
     """读取最新报告"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    report_dir = os.path.normpath(os.path.join(script_dir, '..', 'output'))
-    files = [f for f in os.listdir(report_dir) if f.startswith('report_') and f.endswith('.md')]
+    files = [f for f in os.listdir(OUTPUT_DIR) if f.startswith('report_') and f.endswith('.md')]
     if not files:
         return None
     files.sort(reverse=True)
-    with open(os.path.join(report_dir, files[0]), 'r') as f:
+    with open(os.path.join(OUTPUT_DIR, files[0]), 'r', encoding='utf-8') as f:
         return f.read()
 
-def call_gemini(prompt, api_key, retries=3):
+def read_latest_data():
+    """读取结构化持仓数据，供 AI 做更精确的金额和占比判断"""
+    data_path = os.path.join(OUTPUT_DIR, 'latest_data.json')
+    if not os.path.exists(data_path):
+        return None
+    with open(data_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+def extract_gemini_text(data):
+    """兼容 generateContent 返回结构，提取文本结果"""
+    candidates = data.get('candidates') or []
+    if not candidates:
+        raise ValueError(f"Gemini response has no candidates: {data}")
+
+    parts = candidates[0].get('content', {}).get('parts', [])
+    text = ''.join(part.get('text', '') for part in parts if part.get('text'))
+    if not text:
+        raise ValueError(f"Gemini response has no text: {data}")
+    return text
+
+def call_gemini_rest(prompt, api_key, model=DEFAULT_GEMINI_MODEL, retries=3):
     """调用 Gemini API（带重试）"""
-    import urllib.request
-    
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     
     for attempt in range(retries):
         try:
             payload = json.dumps({
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048}
+                "generationConfig": {
+                    "temperature": 0.25,
+                    "maxOutputTokens": 2048,
+                    "responseMimeType": "text/plain"
+                }
             }).encode('utf-8')
             
             req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
             with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read().decode('utf-8'))
-                text = data['candidates'][0]['content']['parts'][0]['text']
-                return text
-        except Exception as e:
-            err_str = str(e)
-            if '429' in err_str and attempt < retries - 1:
-                wait = (attempt + 1) * 10
-                print(f"  Gemini 429, retry in {wait}s...", file=sys.stderr)
+                return extract_gemini_text(data)
+        except urllib.error.HTTPError as e:
+            body = e.read().decode('utf-8', errors='replace')
+            retriable = e.code in (408, 429, 500, 502, 503, 504)
+            if retriable and attempt < retries - 1:
+                wait = min(60, (attempt + 1) * 10)
+                print(f"  Gemini HTTP {e.code}, retry in {wait}s...", file=sys.stderr)
                 time.sleep(wait)
             else:
-                print(f"Gemini error: {e}", file=sys.stderr)
+                print(f"Gemini REST HTTP {e.code}: {body[:500]}", file=sys.stderr)
+                return None
+        except Exception as e:
+            if attempt < retries - 1:
+                wait = min(60, (attempt + 1) * 10)
+                print(f"  Gemini REST error, retry in {wait}s: {e}", file=sys.stderr)
+                time.sleep(wait)
+            else:
+                print(f"Gemini REST error: {e}", file=sys.stderr)
                 return None
     return None
 
-def call_groq(prompt, api_key, retries=3):
+def call_groq(prompt, api_key, model=DEFAULT_GROQ_MODEL, retries=3):
     """调用 Groq API（带重试）"""
-    import urllib.request
-    
     url = "https://api.groq.com/openai/v1/chat/completions"
     
     for attempt in range(retries):
         try:
             payload = json.dumps({
-                "model": "llama-3.3-70b-versatile",
+                "model": model,
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
+                "temperature": 0.25,
                 "max_tokens": 2048
             }).encode('utf-8')
             
@@ -74,26 +107,40 @@ def call_groq(prompt, api_key, retries=3):
                 data = json.loads(resp.read().decode('utf-8'))
                 text = data['choices'][0]['message']['content']
                 return text
+        except urllib.error.HTTPError as e:
+            body = e.read().decode('utf-8', errors='replace')
+            if e.code in (408, 429, 500, 502, 503, 504) and attempt < retries - 1:
+                wait = min(30, (attempt + 1) * 5)
+                print(f"  Groq HTTP {e.code}, retry in {wait}s...", file=sys.stderr)
+                time.sleep(wait)
+            else:
+                print(f"Groq HTTP {e.code}: {body[:500]}", file=sys.stderr)
+                return None
         except Exception as e:
-            err_str = str(e)
-            if ('429' in err_str or '403' in err_str) and attempt < retries - 1:
-                wait = (attempt + 1) * 5
-                print(f"  Groq error, retry in {wait}s...", file=sys.stderr)
+            if attempt < retries - 1:
+                wait = min(30, (attempt + 1) * 5)
+                print(f"  Groq error, retry in {wait}s: {e}", file=sys.stderr)
                 time.sleep(wait)
             else:
                 print(f"Groq error: {e}", file=sys.stderr)
                 return None
     return None
 
-def call_gemini_sdk(prompt, api_key):
-    """使用 google-genai SDK 调用（更稳定）"""
+def call_gemini_sdk(prompt, api_key, model=DEFAULT_GEMINI_MODEL):
+    """使用新版 google-genai SDK 调用 Google AI Studio Gemini API"""
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash')
-        response = model.generate_content(
-            prompt,
-            generation_config={'temperature': 0.3, 'max_output_tokens': 2048}
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.25,
+                max_output_tokens=2048,
+                response_mime_type='text/plain',
+            ),
         )
         return response.text
     except ImportError:
@@ -147,20 +194,30 @@ def send_email(subject, body, username, password, recipient):
         print(f"Email error: {e}", file=sys.stderr)
         return False
 
-def main():
-    report = read_report()
-    if not report:
-        print("No report found. Run analyze.py first.")
-        sys.exit(1)
-    
-    # Build prompt
-    prompt = """你是一位保守型个人投资顾问。请分析以下基金持仓周报，输出完整的调整建议和风险提示。
+def save_ai_analysis(result, backend):
+    """保存 AI 分析结果到 output，方便 GitHub Actions 上传 artifact"""
+    output_path = os.path.join(OUTPUT_DIR, f"ai_analysis_{datetime.now().strftime('%Y%m%d')}.md")
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(f"# AI 基金持仓分析 - {datetime.now().strftime('%Y-%m-%d')}\n\n")
+        f.write(f"- 分析后端: {backend}\n")
+        f.write(f"- Gemini 模型: {DEFAULT_GEMINI_MODEL}\n\n")
+        f.write(result)
+        f.write("\n")
+    return output_path
+
+def build_prompt(report, latest_data):
+    data_block = ""
+    if latest_data:
+        data_block = "\n\nStructured data JSON:\n" + json.dumps(latest_data, ensure_ascii=False, indent=2)
+
+    return """你是一位保守型个人基金组合分析助手。请基于以下自动生成的基金持仓周报和结构化数据，给出本周是否需要调整以及具体操作建议。
 
 ## 分析原则
 - 保守风格：最大回撤容忍<10%，优先保本，不追热点
 - 目标配置：现金35% / 固收35% / 权益25% / QDII 5%
 - 持有基金数量控制在10-12只，不随意新增
-- 调整阈值：单一资产偏离目标>3%才触发再平衡
+- 调整阈值：单一资产类别偏离目标>3%才触发再平衡
+- 金额建议需与当前总市值、持仓占比、目标配置相匹配
 
 ## 输出要求（必须包含以下三个部分）
 
@@ -189,9 +246,20 @@ def main():
 - 建议必须具体可执行，不要泛泛而谈
 - 不要推荐卖出低波红利类基金去追热点
 - 如果市场无明显机会，明确说"本周不建议操作"
+- 仅基于输入数据分析，不要编造没有给出的实时新闻或基金信息
+- 明确声明结果仅供参考，不构成投资建议
 
 Report:
-""" + report
+""" + report + data_block
+
+def main():
+    report = read_report()
+    if not report:
+        print("No report found. Run analyze.py first.")
+        sys.exit(1)
+    
+    latest_data = read_latest_data()
+    prompt = build_prompt(report, latest_data)
     
     # AI 调用策略
     gemini_key = os.environ.get('GEMINI_API_KEY', '')
@@ -202,20 +270,20 @@ Report:
     
     # 策略：优先用 SDK（更稳定），失败退到 REST + 重试
     if gemini_key:
-        print("Trying Gemini SDK...", file=sys.stderr)
+        print(f"Trying Gemini SDK ({DEFAULT_GEMINI_MODEL})...", file=sys.stderr)
         result = call_gemini_sdk(prompt, gemini_key)
         if result:
             backend = 'gemini-sdk'
     
     if not result and gemini_key:
-        print("Trying Gemini REST (with retry)...", file=sys.stderr)
+        print(f"Trying Gemini REST ({DEFAULT_GEMINI_MODEL}, with retry)...", file=sys.stderr)
         time.sleep(2)  # 避免限流
-        result = call_gemini(prompt, gemini_key, retries=3)
+        result = call_gemini_rest(prompt, gemini_key, retries=3)
         if result:
             backend = 'gemini-rest'
     
     if not result and groq_key:
-        print("Trying Groq...", file=sys.stderr)
+        print(f"Trying Groq ({DEFAULT_GROQ_MODEL})...", file=sys.stderr)
         time.sleep(1)
         result = call_groq(prompt, groq_key, retries=2)
         if result:
@@ -230,6 +298,9 @@ Report:
     print("---ANALYSIS RESULT---")
     print(result)
     print("---END---")
+
+    analysis_path = save_ai_analysis(result, backend)
+    print(f"AI analysis saved: {analysis_path}")
     
     # Send email
     username = os.environ.get('GMAIL_USERNAME', '')

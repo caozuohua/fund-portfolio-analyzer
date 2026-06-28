@@ -44,7 +44,9 @@ jobs:
         run: python scripts/ai_analyze.py
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.5-flash' }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: ${{ vars.GROQ_MODEL || 'llama-3.3-70b-versatile' }}
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           GMAIL_RECIPIENT: ${{ secrets.GMAIL_RECIPIENT }}
@@ -61,10 +63,14 @@ jobs:
           REPORT_FILE=$(ls -t output/report_*.md 2>/dev/null | head -1)
           if [ -n "$REPORT_FILE" ]; then
             cp "$REPORT_FILE" "reports/$(basename "$REPORT_FILE")"
-            git add reports/
-            git diff --cached --quiet || git commit -m "report: $(basename "$REPORT_FILE")"
-            git push origin main
           fi
+          AI_REPORT_FILE=$(ls -t output/ai_analysis_*.md 2>/dev/null | head -1)
+          if [ -n "$AI_REPORT_FILE" ]; then
+            cp "$AI_REPORT_FILE" "reports/$(basename "$AI_REPORT_FILE")"
+          fi
+          git add reports/
+          git diff --cached --quiet || git commit -m "report: portfolio analysis $(date +%Y%m%d)"
+          git push origin main
 
       - name: Upload artifacts
         if: steps.analysis.outcome == 'success'
