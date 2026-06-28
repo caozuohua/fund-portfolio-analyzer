@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fund Portfolio Analyzer | 基金持仓智能分析</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface2: #334155;
+      --border: #475569;
+      --text: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --primary: #3b82f6;
+      --green: #10b981;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --cyan: #06b6d4;
+      --purple: #8b5cf6;
+      --radius: 12px;
+      --font: 'Inter', 'Noto Sans SC', sans-serif;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+    /* Nav */
+    .navbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 900;
+      background: rgba(15,23,42,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      height: 56px;
+    }
+    .nav-inner {
+      max-width: 1100px; margin: 0 auto; padding: 0 24px;
+      display: flex; align-items: center; justify-content: space-between; height: 100%;
+    }
+    .nav-brand { font-weight: 700; font-size: 1.05em; color: var(--primary); }
+    .nav-links { display: flex; gap: 24px; }
+    .nav-links a { text-decoration: none; color: var(--text-secondary); font-size: 0.88em; font-weight: 500; transition: color 0.2s; }
+    .nav-links a:hover { color: var(--text); }
+
+    /* Hero */
+    .hero {
+      padding: 100px 0 60px;
+      text-align: center;
+      background: radial-gradient(ellipse at 50% 0%, rgba(59,130,246,0.15) 0%, transparent 60%);
+    }
+    .hero h1 { font-size: 2.4em; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.02em; }
+    .hero h1 span { color: var(--primary); }
+    .hero-sub { color: var(--text-secondary); font-size: 1.05em; margin-bottom: 28px; }
+    .hero-stats { display: flex; justify-content: center; gap: 40px; flex-wrap: wrap; }
+    .hero-stat .num { font-size: 1.8em; font-weight: 700; }
+    .hero-stat .label { font-size: 0.8em; color: var(--text-secondary); }
+
+    /* Sections */
+    section { padding: 56px 0; }
+    section:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .section-title { font-size: 1.4em; font-weight: 700; margin-bottom: 20px; }
+
+    /* Allocation */
+    .allocation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+    .allocation-item { margin-bottom: 18px; }
+    .allocation-header { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9em; }
+    .allocation-header .name { font-weight: 600; }
+    .allocation-header .vals { color: var(--text-secondary); }
+    .bar-track { height: 12px; background: var(--surface2); border-radius: 6px; overflow: hidden; position: relative; }
+    .bar-fill { height: 100%; border-radius: 6px; transition: width 0.8s ease; }
+    .bar-target { position: absolute; top: -2px; width: 2px; height: 16px; background: rgba(255,255,255,0.5); }
+    .bar-fill.cash { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+    .bar-fill.bond { background: linear-gradient(90deg, #10b981, #34d399); }
+    .bar-fill.equity { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+    .bar-fill.qdii { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+
+    /* Holdings Table */
+    .holdings-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
+    .holdings-table th { text-align: left; padding: 10px 12px; color: var(--text-secondary); font-weight: 500; border-bottom: 1px solid var(--border); font-size: 0.85em; }
+    .holdings-table td { padding: 10px 12px; border-bottom: 1px solid rgba(71,85,105,0.3); }
+    .holdings-table tr:hover td { background: rgba(255,255,255,0.03); }
+    .type-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: 500; }
+    .type-badge.cash { background: rgba(59,130,246,0.2); color: #60a5fa; }
+    .type-badge.bond { background: rgba(16,185,129,0.2); color: #34d399; }
+    .type-badge.equity { background: rgba(245,158,11,0.2); color: #fbbf24; }
+    .type-badge.qdii { background: rgba(139,92,246,0.2); color: #a78bfa; }
+    .weight-bar { display: inline-block; height: 6px; border-radius: 3px; background: var(--primary); min-width: 2px; }
+
+    /* Architecture */
+    .arch-flow { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; margin: 24px 0; }
+    .arch-box {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px 20px; text-align: center;
+      min-width: 120px;
+    }
+    .arch-box .icon { font-size: 1.5em; margin-bottom: 4px; }
+    .arch-box .name { font-size: 0.85em; font-weight: 600; }
+    .arch-box .desc { font-size: 0.75em; color: var(--text-secondary); }
+    .arch-arrow { color: var(--text-secondary); font-size: 1.2em; }
+
+    /* Features */
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+    .feature-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+    .feature-card:hover { transform: translateY(-2px); border-color: var(--primary); }
+    .feature-card .icon { font-size: 1.8em; margin-bottom: 10px; }
+    .feature-card h3 { font-size: 1em; font-weight: 600; margin-bottom: 6px; }
+    .feature-card p { font-size: 0.88em; color: var(--text-secondary); }
+
+    /* Footer */
+    .footer { text-align: center; padding: 32px 0; color: var(--text-secondary); font-size: 0.85em; border-top: 1px solid var(--border); }
+
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 1.6em; }
+      .allocation-grid { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+      .arch-flow { flex-direction: column; }
+      .arch-arrow { transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-inner">
+    <div class="nav-brand">💰 Fund Portfolio Analyzer</div>
+    <div class="nav-links">
+      <a href="#overview">Overview</a>
+      <a href="#allocation">Allocation</a>
+      <a href="#holdings">Holdings</a>
+      <a href="#features">Features</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero" id="overview">
+  <div class="container">
+    <h1>Fund <span>Portfolio Analyzer</span></h1>
+    <p class="hero-sub">个人基金持仓智能分析系统 · AI 驱动调整建议 · 自动化周报</p>
+    <div class="hero-stats">
+      <div class="hero-stat"><div class="num">¥1,267,306</div><div class="label">Total Value</div></div>
+      <div class="hero-stat"><div class="num">11</div><div class="label">Funds</div></div>
+      <div class="hero-stat"><div class="num">4</div><div class="label">Asset Classes</div></div>
+      <div class="hero-stat"><div class="num">Weekly</div><div class="label">Auto Report</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- Allocation -->
+<section id="allocation">
+  <div class="container">
+    <h2 class="section-title">Asset Allocation</h2>
+    <div class="allocation-grid">
+      <div>
+        <h3 style="font-size:1em;margin-bottom:16px;color:var(--text-secondary)">Current vs Target</h3>
+        <div class="allocation-item">
+          <div class="allocation-header"><span class="name">Cash / 现金类</span><span class="vals">43.95% → target 35%</span></div>
+          <div class="bar-track"><div class="bar-fill cash" style="width:43.95%"></div><div class="bar-target" style="left:35%"></div></div>
+        </div>
+        <div class="allocation-item">
+          <div class="allocation-header"><span class="name">Bonds / 固收类</span><span class="vals">28.52% → target 35%</span></div>
+          <div class="bar-track"><div class="bar-fill bond" style="width:28.52%"></div><div class="bar-target" style="left:35%"></div></div>
+        </div>
+        <div class="allocation-item">
+          <div class="allocation-header"><span class="name">Equity / 权益类</span><span class="vals">25.30% → target 25%</span></div>
+          <div class="bar-track"><div class="bar-fill equity" style="width:25.30%"></div><div class="bar-target" style="left:25%"></div></div>
+        </div>
+        <div class="allocation-item">
+          <div class="allocation-header"><span class="name">QDII / 海外</span><span class="vals">2.28% → target 5%</span></div>
+          <div class="bar-track"><div class="bar-fill qdii" style="width:2.28%"></div><div class="bar-target" style="left:5%"></div></div>
+        </div>
+      </div>
+      <div>
+        <h3 style="font-size:1em;margin-bottom:16px;color:var(--text-secondary)">Key Insight</h3>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;">
+          <p style="margin-bottom:12px;font-size:0.92em">⚠️ <strong>Cash overweight</strong> — 现金类占比 44%，远高于目标 35%。建议释放约 ¥12 万增持固收（利率债）。</p>
+          <p style="margin-bottom:12px;font-size:0.92em">📉 <strong>Bonds underweight</strong> — 固收占比 28.5%，低于目标 35%。作为保守组合核心，需提升利率债比例。</p>
+          <p style="margin-bottom:12px;font-size:0.92em">✅ <strong>Equity on target</strong> — 权益类 25.3%，接近目标 25%。低波红利为主风格合适。</p>
+          <p style="font-size:0.92em">🌏 <strong>QDII opportunity</strong> — 港股恒生科技估值低位，可小幅加仓至 5%。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Holdings -->
+<section id="holdings">
+  <div class="container">
+    <h2 class="section-title">Holdings (11 Funds)</h2>
+    <div style="overflow-x:auto">
+      <table class="holdings-table">
+        <thead>
+          <tr><th>Fund Name</th><th>Type</th><th>Value (CNY)</th><th>Weight</th><th>Distribution</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>兴业中证同业存单AAA 7天持有</td><td><span class="type-badge cash">Cash</span></td><td>¥303,251</td><td>23.93%</td><td><span class="weight-bar" style="width:96px"></span></td></tr>
+          <tr><td>招商鑫福中短债债券A</td><td><span class="type-badge bond">Bond</span></td><td>¥208,670</td><td>16.47%</td><td><span class="weight-bar" style="width:66px"></span></td></tr>
+          <tr><td>宏利货币B</td><td><span class="type-badge cash">Cash</span></td><td>¥203,100</td><td>16.03%</td><td><span class="weight-bar" style="width:64px"></span></td></tr>
+          <tr><td>广发稳睿六个月持有混合A</td><td><span class="type-badge equity">Mixed</span></td><td>¥148,606</td><td>11.73%</td><td><span class="weight-bar" style="width:47px"></span></td></tr>
+          <tr><td>银河领先债券A</td><td><span class="type-badge bond">Bond</span></td><td>¥102,614</td><td>8.10%</td><td><span class="weight-bar" style="width:32px"></span></td></tr>
+          <tr><td>易方达港股通红利低波联接A</td><td><span class="type-badge equity">Equity</span></td><td>¥83,745</td><td>6.61%</td><td><span class="weight-bar" style="width:26px"></span></td></tr>
+          <tr><td>易方达红利低波ETF联接A</td><td><span class="type-badge equity">Equity</span></td><td>¥78,989</td><td>6.23%</td><td><span class="weight-bar" style="width:25px"></span></td></tr>
+          <tr><td>红土创新优淳货币A</td><td><span class="type-badge cash">Cash</span></td><td>¥50,661</td><td>3.99%</td><td><span class="weight-bar" style="width:16px"></span></td></tr>
+          <tr><td>易方达稳健收益债券A</td><td><span class="type-badge bond">Bond</span></td><td>¥50,018</td><td>3.95%</td><td><span class="weight-bar" style="width:16px"></span></td></tr>
+          <tr><td>广发恒生科技ETF联接(QDII)C</td><td><span class="type-badge qdii">QDII</span></td><td>¥28,850</td><td>2.28%</td><td><span class="weight-bar" style="width:9px"></span></td></tr>
+          <tr><td>华泰柏瑞中证红利低波ETF联接A</td><td><span class="type-badge equity">Equity</span></td><td>¥8,802</td><td>0.69%</td><td><span class="weight-bar" style="width:3px"></span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture -->
+<section>
+  <div class="container">
+    <h2 class="section-title">Architecture</h2>
+    <div class="arch-flow">
+      <div class="arch-box"><div class="icon">📊</div><div class="name">akshare</div><div class="desc">Market Data</div></div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-box"><div class="icon">🐍</div><div class="name">analyze.py</div><div class="desc">Portfolio Analysis</div></div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-box"><div class="icon">📝</div><div class="name">Report</div><div class="desc">Markdown Report</div></div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-box"><div class="icon">🤖</div><div class="name">AI Analyze</div><div class="desc">Gemini / Groq</div></div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-box"><div class="icon">📧</div><div class="name">Email</div><div class="desc">Weekly Delivery</div></div>
+    </div>
+    <p style="text-align:center;color:var(--text-secondary);font-size:0.88em">GitHub Actions 定时执行 · 零服务器成本 · 数据可追溯</p>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="features">
+  <div class="container">
+    <h2 class="section-title">Features</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="icon">📈</div>
+        <h3>Auto Data Fetch</h3>
+        <p>akshare 实时拉取基金净值 + A股指数行情，无需手动更新。</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🧮</div>
+        <h3>Technical Indicators</h3>
+        <p>RSI、MA均线、趋势判断、持仓占比自动计算。</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🤖</div>
+        <h3>AI Analysis</h3>
+        <p>Gemini / Groq 双后端，多模型 fallback，专业调整建议。</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">📧</div>
+        <h3>Weekly Email</h3>
+        <p>GitHub Actions 定时触发，Gmail 自动投递周报。</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🔒</div>
+        <h3>Privacy First</h3>
+        <p>Private 仓库 + Secrets 管理，持仓数据不外泄。</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">📜</div>
+        <h3>History Tracking</h3>
+        <p>每次报告 commit 到 main 分支，完整历史可追溯。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<div class="footer">
+  <div class="container">
+    <p>Fund Portfolio Analyzer · Conservative Style · Cash 35% / Bonds 35% / Equity 25% / QDII 5%</p>
+    <p style="margin-top:4px"><a href="https://github.com/caozuohua/fund-portfolio-analyzer" style="color:var(--primary);text-decoration:none">github.com/caozuohua/fund-portfolio-analyzer</a></p>
+  </div>
+</div>
+
+</body>
+</html>
