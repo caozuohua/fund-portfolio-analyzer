@@ -11,6 +11,12 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
+PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from portfolio_analyzer.analytics import build_portfolio_analysis
+
 def load_config():
     """加载持仓配置"""
     config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'holdings.json')
@@ -106,7 +112,7 @@ def get_index_data():
             results[name] = {'error': str(e)[:50]}
     return results
 
-def generate_report(config, holdings_data, index_data):
+def generate_report(config, holdings_data, index_data, portfolio_analysis):
     """生成 Markdown 报告"""
     total_value = sum(h['value'] for h in holdings_data)
     report_date = datetime.now().strftime('%Y-%m-%d')
@@ -118,32 +124,42 @@ def generate_report(config, holdings_data, index_data):
     lines.append("")
     lines.append(f"- **总市值**: ¥{total_value:,.2f}")
     lines.append(f"- **报告日期**: {report_date}")
+    lines.append(f"- **持仓数量**: {portfolio_analysis['summary']['holding_count']} 只")
+    lines.append(f"- **是否触发再平衡**: {'是' if portfolio_analysis['summary']['rebalance_required'] else '否'}")
+    lines.append(f"- **数据成功率**: {portfolio_analysis['data_quality']['fund_nav_success_rate']:.1f}%")
     lines.append("")
-    
-    # 资产配置
-    type_map = {'货币型': '现金类', '债券型': '固收类', '混合型': '权益类', '股票型': '权益类', '股票型QDII': '权益类QDII'}
-    type_values = {}
-    for h in holdings_data:
-        cat = type_map.get(h['type'], h['type'])
-        type_values[cat] = type_values.get(cat, 0) + h['value']
-    
-    target = {
-        '现金类': {'target': 35},
-        '固收类': {'target': 35},
-        '权益类': {'target': 25},
-        '权益类QDII': {'target': 5},
-    }
     
     lines.append("### 资产配置")
     lines.append("")
-    lines.append("| 类别 | 当前占比 | 目标占比 | 状态 |")
-    lines.append("|------|---------|---------|------|")
-    for cat in ['现金类', '固收类', '权益类', '权益类QDII']:
-        current = type_values.get(cat, 0) / total_value * 100
-        tgt = target.get(cat, {}).get('target', 0)
-        diff = current - tgt
-        flag = '✅' if abs(diff) < 3 else ('⬆️' if diff > 0 else '⬇️')
-        lines.append(f"| {cat} | {current:.1f}% | {tgt}% | {flag} ({diff:+.1f}%) |")
+    lines.append("| 类别 | 当前占比 | 目标占比 | 偏离 | 状态 |")
+    lines.append("|------|---------|---------|------|------|")
+    status_map = {'within_band': '带内', 'overweight': '偏高', 'underweight': '偏低'}
+    for cat, item in portfolio_analysis['allocation'].items():
+        lines.append(
+            f"| {cat} | {item['current_pct']:.1f}% | {item['target_pct']:.1f}% | "
+            f"{item['drift_pct']:+.1f}% | {status_map.get(item['status'], item['status'])} |"
+        )
+    lines.append("")
+
+    lines.append("### 再平衡草案")
+    lines.append("")
+    if portfolio_analysis['rebalance_plan']:
+        for item in portfolio_analysis['rebalance_plan']:
+            action = '减配' if item['action'] == 'reduce' else '增配'
+            lines.append(f"- **{item['asset_class']}**: 建议{action}约 ¥{item['amount']:,.0f}。{item['reason']}")
+    else:
+        lines.append("- 当前主要资产类别均在再平衡阈值内，本周可优先观察。")
+    lines.append("")
+
+    lines.append("### 组合风险")
+    lines.append("")
+    risk = portfolio_analysis['risk']
+    lines.append(f"- **前三大持仓占比**: {risk['top3_weight_pct']:.1f}%（集中度: {risk['concentration_level']}）")
+    if risk['max_position'].get('code'):
+        lines.append(
+            f"- **最大单只持仓**: {risk['max_position']['name']} ({risk['max_position']['code']}) "
+            f"{risk['max_position']['weight_pct']:.1f}%"
+        )
     lines.append("")
     
     # 各基金表现
@@ -173,7 +189,8 @@ def generate_report(config, holdings_data, index_data):
     lines.append("")
     for name, data in index_data.items():
         if 'error' not in data:
-            lines.append(f"- **{name}**: {data['price']:.2f} | 周: {data['chg_5d']:+.1f}% | 月: {data['chg_20d']:+.1f}% | RSI: {data['rsi']:.0f}")
+            signal = portfolio_analysis.get('market', {}).get(name, {}).get('signal', 'neutral')
+            lines.append(f"- **{name}**: {data['price']:.2f} | 周: {data['chg_5d']:+.1f}% | 月: {data['chg_20d']:+.1f}% | RSI: {data['rsi']:.0f} | 信号: {signal}")
         else:
             lines.append(f"- **{name}**: 数据获取失败")
     lines.append("")
@@ -260,7 +277,14 @@ def main():
     
     # 生成报告
     print("\n📝 生成分析报告...")
-    report = generate_report(config, holdings, index_data)
+    portfolio_analysis = build_portfolio_analysis(
+        config,
+        holdings,
+        index_data,
+        success_count=success,
+        fail_count=fail,
+    )
+    report = generate_report(config, holdings, index_data, portfolio_analysis)
     
     # 保存报告到项目根目录的 output/
     output_dir = os.path.join(os.path.dirname(__file__), '..', 'output')
@@ -280,6 +304,7 @@ def main():
             'fail_count': fail,
             'holdings': [{k: v for k, v in h.items()} for h in holdings],
             'index': {k: {kk: vv for kk, vv in v.items() if 'error' not in v} for k, v in index_data.items()},
+            'portfolio_analysis': portfolio_analysis,
         }, f, ensure_ascii=False, indent=2)
     
     print(f"\n✅ 报告已生成: {report_path}")

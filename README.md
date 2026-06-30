@@ -5,8 +5,8 @@
 ## 功能
 
 - 自动拉取基金净值（akshare）+ A股指数行情
-- 计算持仓市值、占比、技术指标（RSI、均线、趋势）
-- 基于保守型配置目标生成调整建议
+- 计算持仓市值、资产类别占比、目标偏离、再平衡草案、集中度风险
+- 基于保守型配置目标生成可测试的确定性诊断，再交给 AI 做研判
 - 支持 Gemini / Groq 双 AI 后端分析
 - 通过 GitHub Actions 定时执行，邮件发送报告
 
@@ -108,12 +108,21 @@ https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
 
 - `output/report_YYYYMMDD.md`：基金净值、配置偏离、市场指数等基础周报
 - `output/ai_analysis_YYYYMMDD.md`：Gemini/Groq 生成的持仓诊断、调仓建议和风险提示
+- `output/latest_data.json`：包含 `portfolio_analysis` 结构化诊断，供 AI 和后续自动化使用
 
 GitHub Actions 会上传 `output/` 为 artifact，并把最新报告复制到 `reports/` 后提交到仓库。
 
 如果提交报告步骤出现 `Write access to repository not granted`，检查仓库：
 
 Settings > Actions > General > Workflow permissions，选择 **Read and write permissions**，并保存。
+
+## 架构
+
+- `scripts/analyze.py`：负责数据采集、净值匹配、指数指标和报告落盘
+- `portfolio_analyzer/analytics.py`：负责资产分类、配置偏离、再平衡草案、集中度和市场信号
+- `scripts/ai_analyze.py`：读取 Markdown 和 `latest_data.json`，调用 Google AI Studio REST API 生成解释和执行建议
+- `tests/`：覆盖组合诊断核心逻辑，GitHub Actions 会先运行测试再生成周报
+- `docs/investment_platform_research.md`：个人资产配置/投研平台调研和功能映射
 
 ## Schedule
 

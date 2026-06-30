@@ -1,5 +1,5 @@
 {
-  "date": "2026-06-27T22:31:40.208183",
+  "date": "2026-06-29T01:05:12.111157",
   "total_value": 1267392.0627650002,
   "success_count": 9,
   "fail_count": 2,
@@ -168,29 +168,287 @@
     }
   ],
   "index": {
-    "沪深300": {
-      "price": 4868.22,
-      "chg_5d": -3.783653447069557,
-      "chg_20d": -0.48854075533715235,
-      "rsi": 52.52480510276401
+    "沪深300": {},
+    "创业板指": {},
+    "中证500": {},
+    "中证1000": {}
+  },
+  "portfolio_analysis": {
+    "summary": {
+      "style": "保守",
+      "risk_tolerance": "最大回撤<10%",
+      "total_value": 1267392.06,
+      "holding_count": 11,
+      "investable_cash_pct": 43.96,
+      "rebalance_required": true
     },
-    "创业板指": {
-      "price": 4194.21,
-      "chg_5d": -3.7890622311837263,
-      "chg_20d": 3.8697854109139618,
-      "rsi": 57.77444341342389
+    "holdings": [
+      {
+        "code": "017704",
+        "name": "兴业中证同业存单AAA指数7天持有期",
+        "type": "货币型",
+        "shares": 286085.51,
+        "nav": 1.06,
+        "value": 303365.07480400003,
+        "weight": 23.94,
+        "current_nav": 1.0604,
+        "nav_data": {
+          "nav": 1.0604,
+          "daily_chg": "0.00",
+          "buy_status": "限大额",
+          "sell_status": "开放赎回"
+        },
+        "asset_class": "现金类"
+      },
+      {
+        "code": "008774",
+        "name": "招商鑫福中短债债券A",
+        "type": "债券型",
+        "shares": 174619.63,
+        "nav": 1.195,
+        "value": 208670.45785,
+        "weight": 16.46,
+        "current_nav": 1.195,
+        "nav_data": {
+          "nav": 1.195,
+          "daily_chg": "0.01",
+          "buy_status": "限大额",
+          "sell_status": "开放赎回"
+        },
+        "asset_class": "固收类"
+      },
+      {
+        "code": "000700",
+        "name": "宏利货币B",
+        "type": "货币型",
+        "shares": 203100.14,
+        "nav": 1.0,
+        "value": 203100.14,
+        "weight": 16.03,
+        "asset_class": "现金类"
+      },
+      {
+        "code": "012943",
+        "name": "广发稳睿六个月持有期混合A",
+        "type": "混合型",
+        "shares": 123120.34,
+        "nav": 1.207,
+        "value": 148569.314278,
+        "weight": 11.72,
+        "current_nav": 1.2067,
+        "nav_data": {
+          "nav": 1.2067,
+          "daily_chg": "-0.20",
+          "buy_status": "开放申购",
+          "sell_status": "开放赎回"
+        },
+        "asset_class": "权益类"
+      },
+      {
+        "code": "519669",
+        "name": "银河领先债券A",
+        "type": "债券型",
+        "shares": 78391.37,
+        "nav": 1.309,
+        "value": 102622.14246699998,
+        "weight": 8.1,
+        "current_nav": 1.3091,
+        "nav_data": {
+          "nav": 1.3091,
+          "daily_chg": "0.02",
+          "buy_status": "开放申购",
+          "sell_status": "开放赎回"
+        },
+        "asset_class": "固收类"
+      },
+      {
+        "code": "021457",
+        "name": "易方达港股通红利低波联接A",
+        "type": "股票型",
+        "shares": 76270.62,
+        "nav": 1.098,
+        "value": 83729.88663600001,
+        "weight": 6.61,
+        "current_nav": 1.0978,
+        "nav_data": {
+          "nav": 1.0978,
+          "daily_chg": "-0.92",
+          "buy_status": "开放申购",
+          "sell_status": "开放赎回"
+        },
+        "asset_class": "权益类"
+      },
+      {
+        "code": "020602",
+        "name": "易方达红利低波ETF联接A",
+        "type": "股票型",
+        "shares": 79545.72,
+        "nav": 0.993,
+        "value": 79020.71824799999,
+        "weight": 6.23,
+        "current_nav": 0.9934,
+        "nav_data": {
+          "nav": 0.9934,
+          "daily_chg": "-0.48",
+          "buy_status": "开放申购",
+          "sell_status": "开放赎回"
+        },
+        "asset_class": "权益类"
+      },
+      {
+        "code": "005150",
+        "name": "红土创新优淳货币A",
+        "type": "货币型",
+        "shares": 50660.52,
+        "nav": 1.0,
+        "value": 50660.52,
+        "weight": 4.0,
+        "asset_class": "现金类"
+      },
+      {
+        "code": "110007",
+        "name": "易方达稳健收益债券A",
+        "type": "债券型",
+        "shares": 36010.0,
+        "nav": 1.389,
+        "value": 50007.087,
+        "weight": 3.95,
+        "current_nav": 1.3887,
+        "nav_data": {
+          "nav": 1.3887,
+          "daily_chg": "-0.44",
+          "buy_status": "开放申购",
+          "sell_status": "开放赎回"
+        },
+        "asset_class": "固收类"
+      },
+      {
+        "code": "012805",
+        "name": "广发恒生科技ETF联接(QDII)C",
+        "type": "股票型QDII",
+        "shares": 42055.1,
+        "nav": 0.686,
+        "value": 28845.59309,
+        "weight": 2.28,
+        "current_nav": 0.6859,
+        "nav_data": {
+          "nav": 0.6859,
+          "daily_chg": "-3.41",
+          "buy_status": "开放申购",
+          "sell_status": "开放赎回"
+        },
+        "asset_class": "权益类QDII"
+      },
+      {
+        "code": "007466",
+        "name": "华泰柏瑞中证红利低波动ETF联接A",
+        "type": "股票型",
+        "shares": 5840.94,
+        "nav": 1.507,
+        "value": 8801.128391999999,
+        "weight": 0.69,
+        "current_nav": 1.5068,
+        "nav_data": {
+          "nav": 1.5068,
+          "daily_chg": "-0.44",
+          "buy_status": "开放申购",
+          "sell_status": "开放赎回"
+        },
+        "asset_class": "权益类"
+      }
+    ],
+    "allocation": {
+      "现金类": {
+        "current_value": 557125.73,
+        "current_pct": 43.96,
+        "target_pct": 35.0,
+        "drift_pct": 8.96,
+        "drift_value": 113538.51,
+        "status": "overweight"
+      },
+      "固收类": {
+        "current_value": 361299.69,
+        "current_pct": 28.51,
+        "target_pct": 35.0,
+        "drift_pct": -6.49,
+        "drift_value": -82287.53,
+        "status": "underweight"
+      },
+      "权益类": {
+        "current_value": 320121.05,
+        "current_pct": 25.26,
+        "target_pct": 25.0,
+        "drift_pct": 0.26,
+        "drift_value": 3273.03,
+        "status": "within_band"
+      },
+      "权益类QDII": {
+        "current_value": 28845.59,
+        "current_pct": 2.28,
+        "target_pct": 5.0,
+        "drift_pct": -2.72,
+        "drift_value": -34524.01,
+        "status": "within_band"
+      }
     },
-    "中证500": {
-      "price": 8703.57,
-      "chg_5d": -1.86282667965606,
-      "chg_20d": 4.115168740938513,
-      "rsi": 60.58132627334683
+    "rebalance_plan": [
+      {
+        "asset_class": "现金类",
+        "action": "reduce",
+        "amount": 113538.51,
+        "reason": "当前占比高于目标 9.0 个百分点，超过 5.0% 阈值"
+      },
+      {
+        "asset_class": "固收类",
+        "action": "add",
+        "amount": 82287.53,
+        "reason": "当前占比低于目标 6.5 个百分点，超过 5.0% 阈值"
+      }
+    ],
+    "risk": {
+      "top3_weight_pct": 56.43,
+      "max_position": {
+        "code": "017704",
+        "name": "兴业中证同业存单AAA指数7天持有期",
+        "weight_pct": 23.94,
+        "value": 303365.07
+      },
+      "concentration_level": "medium"
     },
-    "中证1000": {
-      "price": 8601.41,
-      "chg_5d": -2.9808204221221657,
-      "chg_20d": 2.2913064264087124,
-      "rsi": 56.78732442081674
+    "market": {
+      "沪深300": {
+        "signal": "unavailable",
+        "error": "('Connection aborted.', RemoteDisconnected('Remote"
+      },
+      "创业板指": {
+        "signal": "unavailable",
+        "error": "('Connection aborted.', RemoteDisconnected('Remote"
+      },
+      "中证500": {
+        "signal": "unavailable",
+        "error": "('Connection aborted.', RemoteDisconnected('Remote"
+      },
+      "中证1000": {
+        "signal": "unavailable",
+        "error": "('Connection aborted.', RemoteDisconnected('Remote"
+      }
+    },
+    "data_quality": {
+      "fund_nav_success_count": 9,
+      "fund_nav_fail_count": 2,
+      "fund_nav_success_rate": 81.82
+    },
+    "ai_context": {
+      "decision_rules": {
+        "risk_style": "保守",
+        "rebalance_threshold_pct": 5.0,
+        "avoid_chasing_hot_themes": true,
+        "prefer_capital_preservation": true
+      },
+      "focus_questions": [
+        "现金类需要reduce约113,539元，是否可通过存量基金内部调整完成？",
+        "固收类需要add约82,288元，是否可通过存量基金内部调整完成？"
+      ]
     }
   }
 }
