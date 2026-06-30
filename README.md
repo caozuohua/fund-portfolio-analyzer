@@ -90,6 +90,13 @@ git commit -m "update: 持仓变更"
 git push
 ```
 
+## 当前配置策略
+
+- 支付宝基金处理策略与产品筛选建议：[`docs/alipay_fund_strategy_20260630.md`](docs/alipay_fund_strategy_20260630.md)
+- GitHub issue 操作清单：<https://github.com/caozuohua/fund-portfolio-analyzer/issues/2>
+
+当前策略按“保守、至少持有半年、尽量向年化 5% 靠近”设计。文档记录的是调仓计划和产品去留建议，不代表交易已执行；实际持仓仍以 `config/holdings.json` 为准。
+
 ## AI 后端优先级
 
 1. **Gemini** → Google AI Studio REST API（默认 `gemini-2.5-flash-lite`，失败后尝试 `gemini-2.5-flash`）
