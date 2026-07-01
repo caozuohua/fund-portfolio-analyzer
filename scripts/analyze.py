@@ -16,6 +16,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from portfolio_analyzer.analytics import build_portfolio_analysis
+from portfolio_analyzer.dashboard import render_dashboard_html
+from portfolio_analyzer.history import append_history_records, build_history_records, read_snapshots
 
 def load_config():
     """加载持仓配置"""
@@ -115,7 +117,7 @@ def get_index_data():
 def generate_report(config, holdings_data, index_data, portfolio_analysis):
     """生成 Markdown 报告"""
     total_value = sum(h['value'] for h in holdings_data)
-    report_date = datetime.now().strftime('%Y-%m-%d')
+    report_date = portfolio_analysis.get('summary', {}).get('report_date') or datetime.now().strftime('%Y-%m-%d')
     
     lines = []
     lines.append(f"# 基金持仓周报 - {report_date}")
@@ -275,6 +277,8 @@ def main():
     print("\n📈 获取A股指数数据...")
     index_data = get_index_data()
     
+    report_date = datetime.now().strftime('%Y-%m-%d')
+
     # 生成报告
     print("\n📝 生成分析报告...")
     portfolio_analysis = build_portfolio_analysis(
@@ -284,6 +288,7 @@ def main():
         success_count=success,
         fail_count=fail,
     )
+    portfolio_analysis['summary']['report_date'] = report_date
     report = generate_report(config, holdings, index_data, portfolio_analysis)
     
     # 保存报告到项目根目录的 output/
@@ -291,12 +296,12 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     
     report_path = os.path.join(output_dir, f"report_{datetime.now().strftime('%Y%m%d')}.md")
-    with open(report_path, 'w') as f:
+    with open(report_path, 'w', encoding='utf-8') as f:
         f.write(report)
     
     # 保存原始数据
     data_path = os.path.join(output_dir, 'latest_data.json')
-    with open(data_path, 'w') as f:
+    with open(data_path, 'w', encoding='utf-8') as f:
         json.dump({
             'date': datetime.now().isoformat(),
             'total_value': total_value,
@@ -306,9 +311,27 @@ def main():
             'index': {k: {kk: vv for kk, vv in v.items() if 'error' not in v} for k, v in index_data.items()},
             'portfolio_analysis': portfolio_analysis,
         }, f, ensure_ascii=False, indent=2)
+
+    # 保存历史 CSV 并生成静态看板
+    data_dir = os.path.join(PROJECT_ROOT, 'data')
+    nav_history_path = os.path.join(data_dir, 'fund_nav_history.csv')
+    snapshot_path = os.path.join(data_dir, 'portfolio_snapshots.csv')
+    history_records = build_history_records(report_date, holdings, portfolio_analysis)
+    append_history_records(nav_history_path, snapshot_path, history_records)
+
+    docs_dir = os.path.join(PROJECT_ROOT, 'docs')
+    os.makedirs(docs_dir, exist_ok=True)
+    dashboard_path = os.path.join(docs_dir, 'index.html')
+    snapshots = read_snapshots(snapshot_path)
+    dashboard_html = render_dashboard_html(snapshots, portfolio_analysis)
+    with open(dashboard_path, 'w', encoding='utf-8') as f:
+        f.write(dashboard_html)
     
     print(f"\n✅ 报告已生成: {report_path}")
     print(f"✅ 数据已保存: {data_path}")
+    print(f"✅ 历史净值已保存: {nav_history_path}")
+    print(f"✅ 组合快照已保存: {snapshot_path}")
+    print(f"✅ 看板已生成: {dashboard_path}")
     
     # 输出报告到 stdout
     print("\n" + "="*60)

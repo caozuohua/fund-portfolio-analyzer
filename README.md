@@ -116,8 +116,11 @@ https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
 - `output/report_YYYYMMDD.md`：基金净值、配置偏离、市场指数等基础周报
 - `output/ai_analysis_YYYYMMDD.md`：Gemini/Groq 生成的持仓诊断、调仓建议和风险提示
 - `output/latest_data.json`：包含 `portfolio_analysis` 结构化诊断，供 AI 和后续自动化使用
+- `data/fund_nav_history.csv`：按日期和基金代码去重保存历史净值、市值和占比
+- `data/portfolio_snapshots.csv`：按日期保存组合总市值、资产配置、集中度和再平衡状态
+- `docs/index.html`：静态组合看板，展示市值趋势、配置趋势、当前配置偏离和再平衡草案
 
-GitHub Actions 会上传 `output/` 为 artifact，并把最新报告复制到 `reports/` 后提交到仓库。
+GitHub Actions 会上传 `output/`、`data/` 和 `docs/index.html` 为 artifact，并把最新报告、历史 CSV 和看板提交到仓库。
 
 如果提交报告步骤出现 `Write access to repository not granted`，检查仓库：
 
@@ -127,6 +130,8 @@ Settings > Actions > General > Workflow permissions，选择 **Read and write pe
 
 - `scripts/analyze.py`：负责数据采集、净值匹配、指数指标和报告落盘
 - `portfolio_analyzer/analytics.py`：负责资产分类、配置偏离、再平衡草案、集中度和市场信号
+- `portfolio_analyzer/history.py`：负责历史净值和组合快照 CSV 的去重写入
+- `portfolio_analyzer/dashboard.py`：负责生成无需服务端的静态 HTML 看板
 - `scripts/ai_analyze.py`：读取 Markdown 和 `latest_data.json`，调用 Google AI Studio REST API 生成解释和执行建议
 - `tests/`：覆盖组合诊断核心逻辑，GitHub Actions 会先运行测试再生成周报
 - `docs/investment_platform_research.md`：个人资产配置/投研平台调研和功能映射

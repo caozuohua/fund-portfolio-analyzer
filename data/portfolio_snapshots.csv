@@ -1,0 +1,2 @@
+date,total_value,holding_count,cash_pct,bond_pct,equity_pct,qdii_pct,top3_weight_pct,max_position_code,max_position_name,max_position_weight_pct,rebalance_required,fund_nav_success_rate
+2026-06-29,1267392.06,11,43.96,28.51,25.26,2.28,56.43,017704,兴业中证同业存单AAA指数7天持有期,23.94,true,81.82

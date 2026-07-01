@@ -63,7 +63,7 @@ jobs:
         if: failure()
         run: echo "WORKFLOW_FAILED=true" >> $GITHUB_ENV
 
-      - name: Commit report to repo
+      - name: Commit report and history to repo
         if: steps.analysis.outcome == 'success'
         run: |
           mkdir -p reports
@@ -75,11 +75,11 @@ jobs:
           if [ -n "$AI_REPORT_FILE" ]; then
             cp "$AI_REPORT_FILE" "reports/$(basename "$AI_REPORT_FILE")"
           fi
-          git add reports/
+          git add reports/ data/ docs/index.html
           if git diff --cached --quiet; then
-            echo "No report changes to commit."
+            echo "No report or history changes to commit."
           else
-            git commit -m "report: portfolio analysis $(date +%Y%m%d)"
+            git commit -m "report: portfolio analysis and history $(date +%Y%m%d)"
             git push origin HEAD:${GITHUB_REF_NAME}
           fi
 
@@ -88,7 +88,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: report-${{ github.run_number }}
-          path: output/
+          path: |
+            output/
+            data/
+            docs/index.html
           retention-days: 90
 
   notify-failure:
